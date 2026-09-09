@@ -63,6 +63,7 @@ const sweepTuningGroups=[
  ['motion','运动节奏',['period','motionStart','motionMiddle','motionEnd','motionPeak','motionSoftness'],'调节起步、中段和收尾的相对速度；重复周期控制整轮时长。'],
  ['direction','方向与倾斜',['direction','tilt'],'先选移动方向，再调整倾斜角度；上、中、下始终对应画板实际位置。'],
  ['head','主星团轮廓',['headWidth','headUpper','headMiddle','headLower'],'饱满度改变对应部位的厚薄：0 收起，1 保持，2 加厚。'],
+ ['twinkle','主星团闪烁',['headTwinkle','headTwinkleRate','headStarDensity','headGlow'],'星点随主团移动，各自闪亮、回落。底光越低越细碎；闪烁强度调到 0 可恢复连续亮区。'],
  ['stars','残星轮廓',['starGap','starWidth','starUpper','starMiddle','starLower','starDensity','starLife','starBrightness'],'饱满度改变疏密与展开范围，亮度单独调整。展开宽度沿移动方向的横向调节，8 为全宽。']
 ];
 const sweepGroupState=new Map();
@@ -85,7 +86,7 @@ const flameHeightKeys=['baseLeft','baseMiddle','baseRight'];
 function renderTuning(l){tuningEditing=false;
  const list=T.controls(l);$('tuningSection').classList.toggle('hide',!list.length);
  const followHint=l.starFollow==='path-v1'?'距离按行程平均速度换算为延迟，残星会走完路线再消散。':'旧工程保留位置偏移；调整距离可启用完整路线跟随。';
- $('tuningHint').textContent=l.type==='whiteSweep'?'按运动、方向、主团与残星分别调整。饱满度塑造轮廓，画面与速度曲线实时变化。':l.type==='flame'?((l.flameBase==='level-v1'?'左、中、右高度从同一水平底线计算，三段平滑连接。':'当前沿异形底边燃烧；调整任一基础高度即可改用统一水平底线。')+' 先调基础轮廓，再叠加随机风力和跳动；没有灯位的部分自然裁切。'):l.type==='showcase'?'每区最薄 1 排，按红 / 橙 / 红 / 白循环排列。横向共 8 排；斜向沿错排灯珠对齐。超出灯阵的部分自然截断，亮块沿所选灯排移动。':'参数实时预览，并随工程和 INO 保存。';
+ $('tuningHint').textContent=l.type==='whiteSweep'?'主团由错落闪烁的星点组成，轮廓与移动节奏独立可调；残星在后方跟随。':l.type==='flame'?((l.flameBase==='level-v1'?'左、中、右高度从同一水平底线计算，三段平滑连接。':'当前沿异形底边燃烧；调整任一基础高度即可改用统一水平底线。')+' 先调基础轮廓，再叠加随机风力和跳动；没有灯位的部分自然裁切。'):l.type==='showcase'?'每区最薄 1 排，按红 / 橙 / 红 / 白循环排列。横向共 8 排；斜向沿错排灯珠对齐。超出灯阵的部分自然截断，亮块沿所选灯排移动。':'参数实时预览，并随工程和 INO 保存。';
  $('tuningFields').querySelectorAll('[data-sweep-group]').forEach(group=>sweepGroupState.set(group.dataset.sweepGroup,group.open));
  const controlHtml=d=>{
   const value=l.tuning?.[d.key]??(l.type==='flame'&&flameHeightKeys.includes(d.key)?l.tuning?.height??2.8:d.legacyValue??d.value),unit=l.type==='whiteSweep'&&d.key==='starWidth'&&(l.tuning?.direction??0)>=2?'份':d.unit,accessibleLabel=l.type==='whiteSweep'&&/^(head|star)(Upper|Middle|Lower)$/.test(d.key)?(d.key.startsWith('head')?'主星团':'残星')+d.label:d.label,disabled=l.type==='flame'&&['windStrength','windFrequency'].includes(d.key)&&!l.tuning?.randomWind;let input;

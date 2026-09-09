@@ -24,7 +24,7 @@ function columns(rows){return Array.from({length:rows[0].length},(_,x)=>rows.red
 function textColumns(text){const out=[];for(const ch of Array.from(text.toUpperCase())){out.push(...columns(FONT[ch]||FONT['?']),0);}return out;}
 const NAMES={whiteSweep:'参考复刻 · 冷白星流',showcase:'视频同款 · 分区编排',hexagram:'六芒星',heart:'心跳爱心',flame:'底部火焰',emoji:'像素表情',text:'滚动文字',spin:'旋转眩光',strobe:'交错频闪',rain:'数字雨滴',comet:'彗星拖尾',equalizer:'律动均衡器',spiral:'星云旋涡',sparkle:'星空闪烁',wave:'海浪推进',checker:'棋盘翻转'};
 const PRESETS=[
- ['灯光效果','whiteSweep','冷白星流 · 参考','单团外扫 · 短促残星'],
+ ['灯光效果','whiteSweep','冷白星流 · 参考','星团闪烁 · 残星外扫'],
  ['灯光效果','magic-comet','魔法扫帚','扫过留下闪闪星光'],
  ['灯光效果','showcase','视频分区编排','红橙白 · 四段节拍'],
  ['灯光效果','flame','底部火焰','跳动火舌'],['灯光效果','blue-fire','冰蓝焰火','冷色渐变'],['灯光效果','rain','数字雨滴','向下流淌'],['灯光效果','comet','彗星拖尾','长尾划过'],['灯光效果','spiral','星云旋涡','旋臂流动'],['灯光效果','sparkle','星空闪烁','随机明灭'],['灯光效果','wave','海浪推进','起伏波峰'],

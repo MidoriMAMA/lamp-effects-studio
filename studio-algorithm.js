@@ -37,7 +37,7 @@ function exportBundle(project,points,options={}){
  const check=supported(project),p=check.project,name=moduleName(options.namespaceName);
  if(!check.supported)throw Error(check.reasons.join('；')+'。请关闭对应图层/拖尾，或明确选择逐帧导出。');
  if(!Array.isArray(points)||points.length!==199||new Set(points.map(pt=>pt.wire)).size!==199||points.some(pt=>!Number.isInteger(pt.wire)||pt.wire<0||pt.wire>=199))throw Error('算法导出需要完整的 199 灯接线表');
- const layers=p.layers.filter(l=>l.enabled&&l.mask.some(Boolean)),shared=new Map(),parts=[],evaluations=[],notes=[];
+ const layers=p.layers.filter(l=>l.enabled&&l.mask.some(Boolean)),shared=new Map(),extensions=new Map(),parts=[],evaluations=[],notes=[];
  let resourceBytes=0,hasSweep=false;
  const canonical=points.every((pt,i)=>{let y=0,x=i;while(x>=E.ROWS[y])x-=E.ROWS[y++];const start=E.ROWS.slice(0,y).reduce((a,b)=>a+b,0);return pt.lx===x&&pt.ly===y&&pt.wire===start+(y%2?E.ROWS[y]-1-x:x);});
  let wireCode;
@@ -50,6 +50,7 @@ function exportBundle(project,points,options={}){
   else if(l.type==='whiteSweep'){hasSweep=true;emission=Sweep.emit(l,points.map(pt=>({...p.layout?E.gridPosition(pt,p.layout):E.physicalPosition(pt),row:pt.ly})),id);}
   else emission={code:'',sample:null,resourceBytes:0};
   if(emission.sharedCode)shared.set(l.type,emission.sharedCode);
+  if(emission.extensions)for(const [guard,code] of emission.extensions)extensions.set(guard,code);
   resourceBytes+=emission.resourceBytes||0;notes.push(...emission.notes||[]);
   parts.push(emission.code,opacityFunction(l,id));
   let mask='true';
@@ -71,7 +72,7 @@ function exportBundle(project,points,options={}){
  const alpha=layers.map((_,i)=>`e${i}_alpha(t)`).join(',')||'0';
  const alpha0=layers.map((_,i)=>`e${i}_alpha(0)`).join(',')||'0';
  const payload={revision:1,namespaceName:name,project:p};
- const sharedText=[...shared.entries()].map(([kind,code])=>`#ifndef LAMP_STUDIO_${kind.toUpperCase()}_KERNEL_V1\n#define LAMP_STUDIO_${kind.toUpperCase()}_KERNEL_V1\nnamespace LampStudioKernel {\n${code}\n}\n#endif`).join('\n');
+ const sharedText=[...shared.entries()].map(([kind,code])=>`#ifndef LAMP_STUDIO_${kind.toUpperCase()}_KERNEL_V1\n#define LAMP_STUDIO_${kind.toUpperCase()}_KERNEL_V1\nnamespace LampStudioKernel {\n${code}\n}\n#endif`).join('\n')+(extensions.size?'\n'+[...extensions.entries()].map(([guard,code])=>`#ifndef ${guard}\n#define ${guard}\nnamespace LampStudioKernel {\n${code}\n}\n#endif`).join('\n'):'');
  const source=`// Lamp Studio algorithm module v1. No RGB frame table; no setup()/loop()/LED driver.
 // Use this same source as ${name}.h inside your existing firmware.
 // Call ${name}::renderFrame(frameIndex, output) or renderAt(elapsedMs, output).

@@ -1,5 +1,6 @@
 (function(root){
 'use strict';
+const Head=root.StudioHeadStars||(typeof require==='function'?require('./studio-head-stars.js'):null);
 const clamp=x=>Math.max(0,Math.min(1,x)),smooth=x=>{x=clamp(x);return x*x*(3-2*x)},fract=x=>x-Math.floor(x),hash=x=>fract(Math.sin(x*127.1+311.7)*43758.5453);
 // Image-space observations from the first video cycle, normalized onto the lamp width.
 // These constrain motion and timing; they are not inferred hardware addresses.
@@ -79,6 +80,10 @@ function parts(l,x,y,t,context){const o=context?.options||{...DEFAULTS,...l.tuni
    }
  }
  const s=.75*flash*(1-age/life*.35)*o.starBrightness*Math.pow(1-core,2);if(s>.025)stars=Math.max(stars,s);
+ }
+ if(core>0&&(o.headTwinkle??0)>0){
+   const vertical=(o.direction??0)>=2,unitScale=vertical?(bounds.bottom-bounds.top)/Math.max(1e-6,bounds.right-bounds.left):1;
+   core*=Head.factor((qx-curve.position(p))*unitScale,vertical?x:y,t*l.speed,l.seed+k*197,o);
  }
  return {core,stars};
 }

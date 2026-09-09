@@ -160,6 +160,73 @@ static double sweepSample(const SweepConfig &c,SweepTime &state,uint16_t i,doubl
 }
 `;
 
+// Optional v1 extension. Keep the original kernel and SweepConfig unchanged so
+// old generated modules and new modules can be included in either order.
+const headStarsCode=String.raw`
+struct SweepHeadConfig {
+  double amount, rate, density, glow, alongScale;
+  uint32_t seed;
+  const double *across;
+};
+static uint32_t sweepHeadWord(double x) {
+  if(x>=-2147483648.0&&x<=2147483647.0)
+    return static_cast<uint32_t>(static_cast<int32_t>(x));
+  double n=std::fmod(std::trunc(x),4294967296.0);
+  if(n<0)n+=4294967296.0;
+  return static_cast<uint32_t>(n);
+}
+static uint32_t sweepHeadHash(uint32_t x) {
+  x=(x^(x>>16))*0x7feb352du;
+  x=(x^(x>>15))*0x846ca68bu;
+  return x^(x>>16);
+}
+static double sweepHeadFactor(double along,double across,double time,uint32_t seed,const SweepHeadConfig &h) {
+  const double amount=sweepClamp(h.amount);
+  if(amount==0)return 1;
+  if(!std::isfinite(along)||!std::isfinite(across)||!std::isfinite(time))return 0;
+  const double rate=std::max(1.0,std::min(12.0,h.rate));
+  const double density=std::max(.2,std::min(1.0,h.density));
+  const double glow=std::max(0.0,std::min(.6,h.glow));
+  const double pitch=.94,cx=std::floor(along/pitch),cy=std::floor(across/pitch);
+  double stars=0;
+  for(double iy=cy-1;iy<=cy+1;iy++)for(double ix=cx-1;ix<=cx+1;ix++){
+    const uint32_t key=sweepHeadHash(sweepHeadWord(ix)*0x1f123bb5u^sweepHeadWord(iy)*0x5f356495u^seed);
+    if((key>>8)/16777216.0>=density)continue;
+    const uint32_t hx=sweepHeadHash(key+0x9e3779b9u),hy=sweepHeadHash(key+0x68bc21ebu);
+    const uint32_t hz=sweepHeadHash(key+0x02e5be93u);
+    const double x=(ix+.5+((hx&65535u)/65536.0-.5)*.56)*pitch;
+    const double y=(iy+.5+((hy&65535u)/65536.0-.5)*.56)*pitch;
+    const double radius=.62+.2*(hz&65535u)/65536.0;
+    const double dx=along-x,dy=across-y,coverage=1-(dx*dx+dy*dy)/(radius*radius);
+    if(coverage<=0)continue;
+    const double footprint=sweepSmooth(coverage);
+    const double clock=time*rate*(.65+.5*(hx>>16)/65536.0)+(hy>>16)/65536.0;
+    const double phase=clock-std::floor(clock);
+    const double pulse=phase<.09?sweepSmooth(phase/.09):1-sweepSmooth((phase-.09)/.43);
+    const double sparkle=footprint*(.07+.93*pulse)*(.85+.45*(hz>>16)/65536.0);
+    stars=std::max(stars,sparkle);
+  }
+  const double field=std::max(glow,std::min(1.5,stars*1.35));
+  return 1-amount+amount*field;
+}
+static double sweepHeadSample(const SweepConfig &c,const SweepHeadConfig &h,SweepTime &state,uint16_t i,double t) {
+  const SweepTime &s=sweepTime(c,state,t);
+  const SweepParts own=sweepParts(c,i,s);double stars=own.stars;
+  if(c.offsets){
+    stars=0;
+    for(uint16_t k=c.offsets[i];k<c.offsets[i+1];++k){
+      const uint16_t source=c.sources[k];
+      stars+=(source==i?own.stars:sweepParts(c,source,s).stars)*c.weights[k];
+    }
+  }
+  if(c.band)stars*=c.band[i];
+  const double along=(c.dots[i][1]-s.center)*h.alongScale;
+  const double across=h.across?h.across[i]:c.dots[i][0];
+  const double core=own.core>0?own.core*sweepHeadFactor(along,across,t*c.speed,sweepHeadWord(h.seed+s.k*197),h):own.core;
+  return sweepClamp(std::max(core,sweepClamp(stars)));
+}
+`;
+
 function curveResource(l,id){
  const o=l.tuning||{},softness=o.motionSoftness??0,start=o.motionStart??1,middle=o.motionMiddle??1,end=o.motionEnd??1,peak=o.motionPeak??.5;
  const cfg={softness,start,middle,end,peak},a=-.18-.06*softness,b=.6+.06*softness,range=b-a;
@@ -231,6 +298,15 @@ function emit(layer,positions,id){
  resourceBytes+=config.length*8+1;
  code+='static const SweepConfig '+id+'_sweepConfig = {'+list(config)+','+id+'_sweepDots,'+bandName+','+offsetName+','+sourceName+','+weightName+',&'+id+'_sweepCurve,'+(o.starLife>1||delay>0?'true':'false')+'};\n';
  const sample=id+'_sweepSample';
+ if((layer.tuning?.headTwinkle??0)>0){
+  const vertical=direction>=2,alongScale=vertical?(bounds.bottom-bounds.top)/Math.max(1e-6,bounds.right-bounds.left):1;
+  let acrossName='nullptr';
+  if(vertical){acrossName=id+'_headAcross';code+=array('double',acrossName,positions.map(p=>p.x));resourceBytes+=positions.length*8;}
+  code+='static const SweepHeadConfig '+id+'_headConfig = {'+list([o.headTwinkle,o.headTwinkleRate??6,o.headStarDensity??.8,o.headGlow??.08,alongScale])+','+number(layer.seed)+'u,'+acrossName+'};\n';
+  resourceBytes+=5*8+4;
+  code+='static double '+sample+'(uint16_t i,double t) {\n  static SweepTime state={};\n  return sweepHeadSample('+id+'_sweepConfig,'+id+'_headConfig,state,i,t);\n}\n';
+  return {sharedCode,extensions:new Map([['LAMP_STUDIO_WHITESWEEP_HEAD_STARS_KERNEL_V1',headStarsCode]]),code,sample,resourceBytes,notes:['冷白星流资源统计为静态数值净数据，不含指针、对齐及编译器代码；每层另有一份固定时间上下文。','主星团星点采用无状态整数随机场；拖尾仍按原始主团包络抑制。','保留 double 和原 sin 随机函数；目标设备数学库仍需逐帧验证。']};
+ }
  code+='static double '+sample+'(uint16_t i,double t) {\n  static SweepTime state={};\n  return sweepSample('+id+'_sweepConfig,state,i,t);\n}\n';
  return {sharedCode,code,sample,resourceBytes,notes:['冷白星流资源统计为静态数值净数据，不含指针、对齐及编译器代码；每层另有一份固定时间上下文。','保留 double 和原 sin 随机函数；目标设备数学库仍需逐帧验证。']};
 }

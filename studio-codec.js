@@ -52,6 +52,7 @@ void loop() {
 }
 function exportIno(p,points){return codeFor(bake(p,points));}
 function importIno(source,points){if(typeof source!=='string'||source.length>10000000)throw Error('INO 文件不能超过 10 MB');const s=source.replace(/^\uFEFF/,'').replace(/\r\n/g,'\n');const marker=s.match(/\/\* LAMP_STUDIO_V1:([A-Za-z0-9+/=]+) \*\//);
+ if(s.includes('LAMP_STUDIO_RMT_V1:')){const R=root.StudioRmt||(typeof require==='function'?require('./studio-rmt.js'):null);if(!R)throw Error('RMT 导出模块尚未加载，请刷新编辑器');return R.importIno(s,points);}
  if(s.includes('LAMP_STUDIO_ALGORITHM_V1:')){const A=root.StudioAlgorithm||(typeof require==='function'?require('./studio-algorithm.js'):null);if(!A)throw Error('算法导出模块尚未加载，请刷新编辑器');return A.importIno(s,points);}
  if(marker){let p;try{p=E.validate(JSON.parse(unbase64(marker[1])));}catch(err){throw Error('工程信息损坏：'+err.message);}const expected=exportIno(p,points);if(s.trim()!==expected.trim())throw Error('此 INO 的代码或帧数据已被外部修改，不能仅凭工程注释还原效果。请导入未修改的导出文件。');return {project:p,kind:'studio',message:'已完整回读 INO：图层、区域、关键帧及逐帧数据核对一致。'};}
  if(signature(s)===signature(knownSource)){

@@ -1,6 +1,6 @@
 (()=>{
 'use strict';
-const E=window.StudioEngine,C=window.StudioCodec,A=window.StudioAlgorithm,P=window.StudioPatterns,T=window.StudioTuning,Trails=window.StudioTrails,$=id=>document.getElementById(id),points=E.mapping(E.clone(window.STUDIO_LAYOUT)),refs=window.STUDIO_LAYOUT.filter(p=>p.kind!=='control');
+const E=window.StudioEngine,C=window.StudioCodec,A=window.StudioAlgorithm,R=window.StudioRmt,P=window.StudioPatterns,T=window.StudioTuning,Trails=window.StudioTrails,$=id=>document.getElementById(id),points=E.mapping(E.clone(window.STUDIO_LAYOUT)),refs=window.STUDIO_LAYOUT.filter(p=>p.kind!=='control');
 const names={flow:'冷白流光',scan:'柔光流水',breathe:'渐变呼吸',ripple:'扩散光环',particles:'星火粒子',paint:'静态绘制',legacy:'原始 INO',...P.NAMES};
 for(const [type,name] of Object.entries(P.NAMES))if(!['hexagram','heart','emoji'].includes(type))$('addType').add(new Option(name,type));
 for(const [id,name] of Object.entries(P.GLYPH_NAMES))$('glyph').add(new Option(name,id));
@@ -217,16 +217,17 @@ const zone=document.querySelector('.dropzone');zone.ondragover=e=>{e.preventDefa
 let preparedAlgorithm=null;
 function exportSummary(){
  const algorithm=$('exportMode').value==='algorithm',count=Math.round(project.duration*project.fps),size=count*199*3;
- $('algorithmOptions').classList.toggle('hide',!algorithm);$('exportIno').textContent=algorithm?'生成并下载集成包':'生成并下载 INO';
- $('exportDescription').textContent=algorithm?'保存算法、参数和必要的小表，由芯片实时计算。集成包包含头文件、可回读的算法 INO、工程和接入说明。':'将最终 RGB 逐帧写入数组，保留完整预览结果。时长和帧率越高，文件及动画数据越大。';
- $('exportTarget').textContent=algorithm?'集成到现有固件：复用原来的 LED 驱动。模块没有 setup / loop，不单独烧录。':'独立逐帧示例：ESP32 + FastLED，WS2812B 兼容灯、GRB 顺序，199 灯蛇形接线。';
+ $('resourceBudgetField').classList.toggle('hide',!algorithm);$('exportIno').textContent='生成并下载 RMT 包';
+ $('exportDescription').textContent=algorithm?'由芯片按算法实时计算，支持火焰、冷白星流、静态绘制。ZIP 含完整 RMT 测试 INO、合入原固件用的 .h、工程和接入说明。':'将最终 RGB 逐帧保存，支持所有预览效果。ZIP 同样含完整 RMT 测试 INO 和原固件集成模块；时长、帧率越高，动画数据越大。';
+ $('exportTarget').textContent=`ESP32 · RMT 驱动 · GPIO ${project.pin} · 199 灯 · GRB。合入店家固件用 integration 文件夹；单独测试用同名草稿文件夹。`;
  $('exportSummary').classList.remove('error');$('exportIno').disabled=false;preparedAlgorithm=null;
- if(!algorithm){$('exportSummary').textContent=`${project.duration} 秒 × ${project.fps} FPS = ${count} 帧 · 帧数据 ${(size/1024).toFixed(1)} KiB（不含程序和驱动）。`;return;}
  try{
+  R.validateOptions(project,{namespaceName:$('moduleName').value,mode:$('exportMode').value});
+  if(!algorithm){$('exportSummary').textContent=`${project.duration} 秒 × ${project.fps} FPS = ${count} 帧 · 帧数据 ${(size/1024).toFixed(1)} KiB。\n独立示例另有约 18.7 KiB RMT 发送缓冲；合入原驱动不重复分配。固件总 Flash / RAM 以目标板编译为准。`;return;}
   const budget=Number($('resourceBudget').value);if(!Number.isFinite(budget)||budget<1||budget>1024)throw Error('资源预算须在 1–1024 KiB 之间');
-  preparedAlgorithm=A.exportBundle(project,points,{namespaceName:$('moduleName').value});const stats=preparedAlgorithm.stats;
+  preparedAlgorithm=R.exportBundle(project,points,{namespaceName:$('moduleName').value,mode:'algorithm'});const stats=preparedAlgorithm.stats;
   const exceeded=stats.resourceBytesEstimate>budget*1024;
-  $('exportSummary').textContent=`算法源码 ${(stats.sourceBytes/1024).toFixed(1)} KiB · 静态数值资源估算 ${(stats.resourceBytesEstimate/1024).toFixed(2)} KiB\n同工程逐帧颜色数据 ${(stats.rawFrameBytes/1024).toFixed(1)} KiB。资源估算不含算法机器码、对齐和驱动；固件总 Flash / RAM 仍需合入编译。${exceeded?'\n超过当前资源预算，请减少图层或调整预算。':''}`;
+  $('exportSummary').textContent=`完整 INO 文本 ${(stats.sourceBytes/1024).toFixed(1)} KiB · 效果静态数据估算 ${(stats.resourceBytesEstimate/1024).toFixed(2)} KiB\n同工程逐帧数据 ${(stats.rawFrameBytes/1024).toFixed(1)} KiB。独立 RMT 示例另有约 18.7 KiB 发送缓冲；合入原驱动不重复分配。文本大小不等于固件大小，Flash / RAM 仍需合入编译。${exceeded?'\n超过当前资源预算，请减少图层或调整预算。':''}`;
   $('exportIno').disabled=exceeded;$('exportSummary').classList.toggle('error',exceeded);
  }catch(err){$('exportSummary').textContent=err.message;$('exportSummary').classList.add('error');$('exportIno').disabled=true;}
 }
@@ -236,22 +237,20 @@ for(const id of ['moduleName','resourceBudget'])$(id).oninput=exportOptionsChang
 for(const id of ['pin','master'])$(id).onchange=()=>{mutate(p=>p[id]=Number($(id).value));$(id).value=project[id];exportSummary();$('exportSourcePanel').classList.add('hide');$('exportResult').textContent='参数已更新，请重新生成。';};
 let sourceUrl=null,algorithmUrls=[];
 $('exportIno').onclick=async()=>{const b=$('exportIno');b.disabled=true;$('exportResult').textContent='正在生成并校验导出内容…';try{
- await new Promise(r=>setTimeout(r,30));const algorithm=$('exportMode').value==='algorithm';let source,name='LampEffect';
+ await new Promise(r=>setTimeout(r,30));const mode=$('exportMode').value,algorithm=mode==='algorithm';
  for(const url of algorithmUrls)URL.revokeObjectURL(url);algorithmUrls=[];
- $('algorithmDownloads').classList.toggle('hide',!algorithm);
- if(algorithm){
-  const bundle=A.exportBundle(project,points,{namespaceName:$('moduleName').value}),budget=Number($('resourceBudget').value);
-  if(!Number.isFinite(budget)||budget<1||budget>1024||bundle.stats.resourceBytesEstimate>budget*1024)throw Error('静态资源估算超过预算，请调整后重新生成。');
-  name=bundle.namespaceName;source=bundle.files[name+'.ino'];A.importIno(source,points);
-  const pack=A.zip(bundle.files),zipUrl=URL.createObjectURL(new Blob([pack],{type:'application/zip'})),headerUrl=URL.createObjectURL(new Blob([bundle.files[name+'.h']],{type:'text/plain'}));algorithmUrls.push(zipUrl,headerUrl);
-  $('downloadZipLink').href=zipUrl;$('downloadZipLink').download=name+'.zip';$('downloadZipLink').textContent='下载集成包 '+name+'.zip';
-  $('downloadHeaderLink').href=headerUrl;$('downloadHeaderLink').download=name+'.h';$('downloadHeaderLink').textContent='仅下载头文件 '+name+'.h';
-  download(name+'.zip',pack,'application/zip');$('exportResult').textContent='已生成算法集成包并校验工程回读。把 .h 接入原固件；.ino 用于编辑器回读。目标板编译体积和运行耗时待原固件验收。';
-  notify('已导出算法集成包：无需 RGB 帧表，含源码、参数、工程与接入说明。');
- }else{source=C.exportIno(project,points);download('LampEffect.ino',source,'text/plain');$('exportResult').textContent='已生成逐帧 LampEffect.ino 并发起下载。可通过下方链接手动下载或复制源码。';notify('已生成逐帧 INO，包含动画帧与可回读工程。');}
- if(sourceUrl)URL.revokeObjectURL(sourceUrl);sourceUrl=URL.createObjectURL(new Blob([source],{type:'text/plain'}));$('downloadInoLink').href=sourceUrl;$('downloadInoLink').download=name+'.ino';$('downloadInoLink').textContent=(algorithm?'下载算法 INO（回读用）':'手动下载 ')+name+'.ino';$('exportSource').value=source;$('exportSourcePanel').classList.remove('hide');
+ $('algorithmDownloads').classList.remove('hide');
+ const bundle=R.exportBundle(project,points,{namespaceName:$('moduleName').value,mode}),budget=Number($('resourceBudget').value);
+ if(algorithm&&(!Number.isFinite(budget)||budget<1||budget>1024||bundle.stats.resourceBytesEstimate>budget*1024))throw Error('静态资源估算超过预算，请调整后重新生成。');
+ const name=bundle.namespaceName,source=bundle.files[bundle.sketchPath];R.importIno(source,points);
+ const pack=A.zip(bundle.files),zipUrl=URL.createObjectURL(new Blob([pack],{type:'application/zip'})),headerUrl=URL.createObjectURL(new Blob([bundle.files[bundle.headerPath]],{type:'text/plain'}));algorithmUrls.push(zipUrl,headerUrl);
+ $('downloadZipLink').href=zipUrl;$('downloadZipLink').download=bundle.sketchName+'.zip';$('downloadZipLink').textContent='下载完整包 '+bundle.sketchName+'.zip';
+ $('downloadHeaderLink').href=headerUrl;$('downloadHeaderLink').download=name+'.h';$('downloadHeaderLink').textContent='仅下载集成模块 '+name+'.h';
+ download(bundle.sketchName+'.zip',pack,'application/zip');$('exportResult').textContent='已生成 RMT 包并核对源码回读。发给店家整个 ZIP：合入原固件用 integration 文件夹；独立 INO 含驱动和播放入口，用于单独测试。';
+ notify('已生成 RMT 灯效包，包含独立示例、原固件接入代码和工程。');
+ if(sourceUrl)URL.revokeObjectURL(sourceUrl);sourceUrl=URL.createObjectURL(new Blob([source],{type:'text/plain'}));$('downloadInoLink').href=sourceUrl;$('downloadInoLink').download=bundle.sketchName+'.ino';$('downloadInoLink').textContent='仅下载测试草稿 '+bundle.sketchName+'.ino';$('exportSource').value=source;$('exportSourcePanel').classList.remove('hide');
  }catch(err){$('exportResult').textContent=err.message;}finally{exportSummary();}};
-$('copyIno').onclick=async()=>{try{await navigator.clipboard.writeText($('exportSource').value);$('exportResult').textContent='已复制完整 INO 源码，可保存为 LampEffect.ino。';}catch{$('exportSource').closest('details').open=true;$('exportSource').focus();$('exportSource').select();$('exportResult').textContent='源码已全选，请按 Ctrl+C 复制。';}};
+$('copyIno').onclick=async()=>{try{await navigator.clipboard.writeText($('exportSource').value);$('exportResult').textContent='已复制完整 RMT INO 源码，可保存为 '+$('downloadInoLink').download+'。';}catch{$('exportSource').closest('details').open=true;$('exportSource').focus();$('exportSource').select();$('exportResult').textContent='源码已全选，请按 Ctrl+C 复制。';}};
 $('copyProject').onclick=async()=>{try{await navigator.clipboard.writeText($('projectSource').value);$('projectSaveResult').textContent='已复制完整工程，可保存为 .lamp.json 文件。';}catch{$('projectSource').focus();$('projectSource').select();$('projectSaveResult').textContent='工程内容已全选，请按 Ctrl+C 复制。';}};
 document.addEventListener('keydown',e=>{if(document.querySelector('dialog[open]'))return;const editing=['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName);if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();$('saveProject').click();return;}if(editing)return;
  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();$(e.shiftKey?'redo':'undo').click();}else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();$('redo').click();}else if(e.code==='Space'){e.preventDefault();$('play').click();}else if(e.key==='ArrowRight'){e.preventDefault();step(1);}else if(e.key==='ArrowLeft'){e.preventDefault();step(-1);}});

@@ -55,9 +55,40 @@ function renderInspector(){const l=current();$('inspector').classList.toggle('hi
 
 function renderTrail(l){const supported=Trails.TYPES.includes(l.type),o=l.trail||{...Trails.DEFAULTS,enabled:false};$('trailSection').classList.toggle('hide',!supported);$('trailEnabled').checked=o.enabled;$('trailFields').classList.toggle('hide',!o.enabled);$('trailFields').innerHTML=Trails.FIELDS.map(([key,label,min,max,step,unit])=>`<div class="tuning-field"><label for="trail-${key}">${label}</label><div class="tuning-pair"><input type="range" id="trail-${key}" data-trail="${key}" min="${min}" max="${max}" step="${step}" value="${o[key]}"><input type="number" aria-label="${label}数值" data-trail-number="${key}" min="${min}" max="${max}" step="${step}" value="${o[key]}"><small>${unit}</small></div></div>`).join('')+`<div class="trail-color"><label><input type="checkbox" data-trail="followColor" ${o.followColor?'checked':''}>跟随主体颜色</label><label for="trail-color">星光颜色</label><input id="trail-color" type="color" data-trail="color" value="${o.color}" ${o.followColor?'disabled':''}></div>`;}
 $('trailEnabled').onchange=()=>mutate(p=>{p.layers[selected].trail={...Trails.DEFAULTS,...p.layers[selected].trail,enabled:$('trailEnabled').checked};},$('trailEnabled').checked?'星光拖尾已开启：扫过的灯位会留下闪烁星点。':'已关闭星光拖尾，参数保留。');
-let trailEditing=false;
-$('trailFields').oninput=e=>{const key=e.target.dataset.trail||e.target.dataset.trailNumber;if(!key||!current()||e.target.value==='')return;const value=key==='followColor'?e.target.checked:key==='color'?e.target.value:Number(e.target.value);try{const next={...Trails.DEFAULTS,...current().trail,[key]:value};Trails.validate(current().type,next);if(!trailEditing){checkpoint();trailEditing=true;}current().trail=next;document.querySelectorAll(`[data-trail="${key}"],[data-trail-number="${key}"]`).forEach(el=>{if(el!==e.target&&key!=='followColor')el.value=value;});saveLocal();}catch{}};
-$('trailFields').onchange=()=>{trailEditing=false;renderTrail(current());notify('星光拖尾参数已保存，预览与 INO 输出同步。');};
+// Keep controls mounted while editing. Replacing their parent on `change`
+// discards focus, breaks held arrow keys and can swallow the next mouse click.
+function bindParameterPanel(id,keyOf,apply,sync,message){
+ const host=$(id);let editing=null;
+ const update=(e,commit,silent=false)=>{
+  const el=e.target,key=keyOf(el);if(!key||!el.isConnected||!current())return;
+  try{
+   if(el.value==='')throw Error('请输入完整数值；已恢复上次有效值。');
+   apply(el,key,()=>{if(editing!==el){checkpoint();editing=el;}});
+   el.removeAttribute('aria-invalid');sync(el);
+   if(commit&&!silent)notify(message);
+  }catch(err){
+   // Incomplete typing is allowed; on commit, restore the one invalid field.
+   if(commit){sync();notify(err.message,true);}
+  }
+ };
+ host.oninput=e=>update(e,false);host.onchange=e=>update(e,true);
+ host.onpointerdown=()=>{editing=null;};
+ // Also commit on blur: invalid number fields do not reliably emit change.
+ host.addEventListener('focusout',e=>{update(e,true,true);editing=null;});
+}
+function syncTrailInputs(skip){
+ const o={...Trails.DEFAULTS,...current().trail};
+ $('trailFields').querySelectorAll('[data-trail],[data-trail-number]').forEach(el=>{
+  const key=el.dataset.trail||el.dataset.trailNumber;
+  if(el!==skip){if(el.type==='checkbox')el.checked=o[key];else el.value=o[key];}
+ });
+ $('trail-color').disabled=o.followColor;
+}
+bindParameterPanel('trailFields',el=>el.dataset.trail||el.dataset.trailNumber,(el,key,begin)=>{
+ const value=key==='followColor'?el.checked:key==='color'?el.value:Number(el.value);
+ const next={...Trails.DEFAULTS,...current().trail,[key]:value};Trails.validate(current().type,next);
+ if(current().trail?.[key]!==value){begin();current().trail=next;saveLocal();}
+},syncTrailInputs,'星光拖尾参数已保存，预览与 INO 输出同步。');
 
 const sweepTuningGroups=[
  ['motion','运动节奏',['period','motionStart','motionMiddle','motionEnd','motionPeak','motionSoftness'],'调节起步、中段和收尾的相对速度；重复周期控制整轮时长。'],
@@ -83,13 +114,30 @@ function updateSweepSpeedCurve(l){
  }catch{host.innerHTML='<small>当前参数的速度曲线暂不可用。</small>';}
 }
 const flameHeightKeys=['baseLeft','baseMiddle','baseRight'];
-function renderTuning(l){tuningEditing=false;
+function tuningValue(l,d){return l.tuning?.[d.key]??(l.type==='flame'&&flameHeightKeys.includes(d.key)?l.tuning?.height??2.8:d.legacyValue??d.value);}
+function tuningUnit(l,d){return l.type==='whiteSweep'&&d.key==='starWidth'&&(l.tuning?.direction??0)>=2?'份':d.unit;}
+function sweepFollowHint(l){return l.starFollow==='path-v1'?'距离按行程平均速度换算为延迟，残星会走完路线再消散。':'旧工程保留位置偏移；调整距离可启用完整路线跟随。';}
+function syncTuningContext(l){
+ $('tuningHint').textContent=l.type==='whiteSweep'?((l.tuning?.headTwinkle??0)>0?'主团由错落闪烁的星点组成，轮廓与移动节奏独立可调；残星在后方跟随。':'主团闪烁强度当前为 0，可调高开启星点闪烁；轮廓、运动和残星分别调整。'):l.type==='flame'?((l.flameBase==='level-v1'?'左、中、右高度从同一水平底线计算，三段平滑连接。':'当前沿异形底边燃烧；调整任一基础高度即可改用统一水平底线。')+' 先调基础轮廓，再叠加随机风力和跳动；没有灯位的部分自然裁切。'):l.type==='showcase'?'每区最薄 1 排，按红 / 橙 / 红 / 白循环排列。横向共 8 排；斜向沿错排灯珠对齐。超出灯阵的部分自然截断，亮块沿所选灯排移动。':'参数实时预览，并随工程和 INO 保存。';
+ const stars=$('tuningFields').querySelector('[data-sweep-group="stars"] .sweep-group-hint');
+ if(stars)stars.textContent=sweepTuningGroups.find(g=>g[0]==='stars')[3]+' '+sweepFollowHint(l);
+}
+function syncTuningInputs(skip){
+ const l=current();
+ $('tuningFields').querySelectorAll('[data-tune],[data-tune-number]').forEach(el=>{
+  const key=el.dataset.tune||el.dataset.tuneNumber,d=T.defs[l.type].find(d=>d.key===key);
+  if(el!==skip){const value=tuningValue(l,d);if(d.kind==='toggle')el.checked=!!value;else el.value=value;}
+  el.disabled=l.type==='flame'&&['windStrength','windFrequency'].includes(key)&&!l.tuning?.randomWind;
+  const unit=el.closest('.tuning-pair')?.querySelector('small');if(unit)unit.textContent=tuningUnit(l,d);
+ });
+ syncTuningContext(l);updateSweepSpeedCurve(l);
+}
+function renderTuning(l){
  const list=T.controls(l);$('tuningSection').classList.toggle('hide',!list.length);
- const followHint=l.starFollow==='path-v1'?'距离按行程平均速度换算为延迟，残星会走完路线再消散。':'旧工程保留位置偏移；调整距离可启用完整路线跟随。';
- $('tuningHint').textContent=l.type==='whiteSweep'?'主团由错落闪烁的星点组成，轮廓与移动节奏独立可调；残星在后方跟随。':l.type==='flame'?((l.flameBase==='level-v1'?'左、中、右高度从同一水平底线计算，三段平滑连接。':'当前沿异形底边燃烧；调整任一基础高度即可改用统一水平底线。')+' 先调基础轮廓，再叠加随机风力和跳动；没有灯位的部分自然裁切。'):l.type==='showcase'?'每区最薄 1 排，按红 / 橙 / 红 / 白循环排列。横向共 8 排；斜向沿错排灯珠对齐。超出灯阵的部分自然截断，亮块沿所选灯排移动。':'参数实时预览，并随工程和 INO 保存。';
+ const followHint=sweepFollowHint(l);syncTuningContext(l);
  $('tuningFields').querySelectorAll('[data-sweep-group]').forEach(group=>sweepGroupState.set(group.dataset.sweepGroup,group.open));
  const controlHtml=d=>{
-  const value=l.tuning?.[d.key]??(l.type==='flame'&&flameHeightKeys.includes(d.key)?l.tuning?.height??2.8:d.legacyValue??d.value),unit=l.type==='whiteSweep'&&d.key==='starWidth'&&(l.tuning?.direction??0)>=2?'份':d.unit,accessibleLabel=l.type==='whiteSweep'&&/^(head|star)(Upper|Middle|Lower)$/.test(d.key)?(d.key.startsWith('head')?'主星团':'残星')+d.label:d.label,disabled=l.type==='flame'&&['windStrength','windFrequency'].includes(d.key)&&!l.tuning?.randomWind;let input;
+  const value=tuningValue(l,d),unit=tuningUnit(l,d),accessibleLabel=l.type==='whiteSweep'&&/^(head|star)(Upper|Middle|Lower)$/.test(d.key)?(d.key.startsWith('head')?'主星团':'残星')+d.label:d.label,disabled=l.type==='flame'&&['windStrength','windFrequency'].includes(d.key)&&!l.tuning?.randomWind;let input;
   if(d.kind==='color')input=`<input type="color" id="tune-${d.key}" data-tune="${d.key}" value="${value}">`;
   else if(d.kind==='toggle')input=`<input type="checkbox" id="tune-${d.key}" data-tune="${d.key}" ${value?'checked':''}>`;
   else if(d.kind==='select')input=`<select id="tune-${d.key}" data-tune="${d.key}">${d.options.map(([v,label])=>`<option value="${v}" ${v===value?'selected':''}>${label}</option>`).join('')}</select>`;
@@ -102,9 +150,15 @@ function renderTuning(l){tuningEditing=false;
   updateSweepSpeedCurve(l);
  }else $('tuningFields').innerHTML=list.map(controlHtml).join('');
 }
-let tuningEditing=false;
-$('tuningFields').oninput=e=>{const key=e.target.dataset.tune||e.target.dataset.tuneNumber;if(!key||!current())return;const d=T.defs[current().type].find(d=>d.key===key),value=d.kind==='color'?e.target.value:d.kind==='toggle'?Number(e.target.checked):Number(e.target.value);if(e.target.value==='')return;try{const next={...(current().tuning||(['whiteSweep','flame'].includes(current().type)?{}:T.defaults(current().type))),[key]:value},upgradeFlame=current().type==='flame'&&flameHeightKeys.includes(key);if(upgradeFlame)for(const field of flameHeightKeys)next[field]??=current().tuning?.height??2.8;T.validate(current().type,next);if(tuningEditing!==key){checkpoint();tuningEditing=key;}current().tuning=next;if(current().type==='whiteSweep'&&key==='starGap')current().starFollow='path-v1';if(upgradeFlame)current().flameBase='level-v1';document.querySelectorAll(`[data-tune="${key}"],[data-tune-number="${key}"]`).forEach(el=>{if(el!==e.target){if(d.kind==='toggle')el.checked=!!value;else el.value=value;}});updateSweepSpeedCurve(current());saveLocal();}catch{}};
-$('tuningFields').onchange=()=>{tuningEditing=false;renderTuning(current());notify('效果参数已更新，导出 INO 会使用当前画面。');};
+bindParameterPanel('tuningFields',el=>el.dataset.tune||el.dataset.tuneNumber,(el,key,begin)=>{
+ const l=current(),d=T.defs[l.type].find(d=>d.key===key),value=d.kind==='color'?el.value:d.kind==='toggle'?Number(el.checked):Number(el.value);
+ const next={...(l.tuning||(['whiteSweep','flame'].includes(l.type)?{}:T.defaults(l.type))),[key]:value},upgradeFlame=l.type==='flame'&&flameHeightKeys.includes(key),upgradeSweep=l.type==='whiteSweep'&&key==='starGap';
+ if(upgradeFlame)for(const field of flameHeightKeys)next[field]??=l.tuning?.height??2.8;
+ try{T.validate(l.type,next);}catch(err){throw Error(err.message+(d.kind?'':`（${d.min}–${d.max}）；已恢复上次有效值。`));}
+ if(l.tuning?.[key]!==value||(upgradeFlame&&l.flameBase!=='level-v1')||(upgradeSweep&&l.starFollow!=='path-v1')){
+  begin();l.tuning=next;if(upgradeSweep)l.starFollow='path-v1';if(upgradeFlame)l.flameBase='level-v1';saveLocal();
+ }
+},syncTuningInputs,'效果参数已更新，导出 INO 会使用当前画面。');
 $('resetTuning').onclick=()=>mutate(p=>{const l=p.layers[selected];l.tuning=T.defaults(l.type);if(l.type==='flame')l.flameBase='level-v1';},'已恢复此图层的默认精调参数。');
 
 function renderTracks(){
